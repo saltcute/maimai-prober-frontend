@@ -13,15 +13,7 @@ interface VersionPillProps {
 
 export const VersionPill = ({ style }: VersionPillProps) => {
   return (
-    <Paper
-      className={classes.pill}
-      shadow="md"
-      withBorder
-      radius="xl"
-      px="md"
-      py={8}
-      style={style}
-    >
+    <Paper className={classes.pill} shadow="md" withBorder radius="xl" px="md" py={8} style={style}>
       <Group gap="xs" wrap="nowrap">
         <a className={classes.link} href={RELEASE_URL} target="_blank" rel="noreferrer">
           <Group gap={4} wrap="nowrap">

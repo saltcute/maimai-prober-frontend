@@ -234,6 +234,36 @@ async function readEnvironment(page) {
   });
 }
 
+let benchmarkRunIndex = 0;
+
+async function runBenchmark({ page, label, port, environments, cooldownSec }) {
+  if (cooldownSec > 0) {
+    await new Promise((resolve) => setTimeout(resolve, cooldownSec * 1000));
+  }
+  benchmarkRunIndex++;
+  await page.goto(`http://127.0.0.1:${port}/chart/?paired=${benchmarkRunIndex}`, {
+    waitUntil: "domcontentloaded",
+  });
+  await page.waitForFunction(() => window.__chartBench !== undefined, null, { timeout: 60_000 });
+  await page.waitForTimeout(300);
+  const environment = await readEnvironment(page);
+  if (!environment.crossOriginIsolated) {
+    throw new Error(`${label} page is not cross-origin isolated`);
+  }
+  if (/swiftshader|llvmpipe|software/i.test(environment.gpuRenderer)) {
+    throw new Error(`${label} requires hardware acceleration, got ${environment.gpuRenderer}`);
+  }
+  environments.set(label, environment);
+
+  const startedAt = performance.now();
+  const result = await page.evaluate(() => window.__chartBench.score());
+  const elapsedSeconds = (performance.now() - startedAt) / 1000;
+  console.log(
+    `${label}: ${result.throughput.score.toFixed(2)} stress fps, internal RSD ${result.throughput.scoreRelativeStdDevPercent.toFixed(2)}%, ${elapsedSeconds.toFixed(1)}s`,
+  );
+  return result;
+}
+
 const args = parseArgs(process.argv.slice(2));
 if (!args.baseline) {
   console.error(
@@ -291,35 +321,7 @@ try {
   const page = await context.newPage();
   page.on("pageerror", (error) => console.error("page error:", error.message));
 
-  let runIndex = 0;
   const environments = new Map();
-  async function run(label, port) {
-    if (cooldownSec > 0) {
-      await new Promise((resolve) => setTimeout(resolve, cooldownSec * 1000));
-    }
-    runIndex++;
-    await page.goto(`http://127.0.0.1:${port}/chart/?paired=${runIndex}`, {
-      waitUntil: "domcontentloaded",
-    });
-    await page.waitForFunction(() => window.__chartBench !== undefined, null, { timeout: 60_000 });
-    await page.waitForTimeout(300);
-    const environment = await readEnvironment(page);
-    if (!environment.crossOriginIsolated) {
-      throw new Error(`${label} page is not cross-origin isolated`);
-    }
-    if (/swiftshader|llvmpipe|software/i.test(environment.gpuRenderer)) {
-      throw new Error(`${label} requires hardware acceleration, got ${environment.gpuRenderer}`);
-    }
-    environments.set(label, environment);
-
-    const startedAt = performance.now();
-    const result = await page.evaluate(() => window.__chartBench.score());
-    const elapsedSeconds = (performance.now() - startedAt) / 1000;
-    console.log(
-      `${label}: ${result.throughput.score.toFixed(2)} stress fps, internal RSD ${result.throughput.scoreRelativeStdDevPercent.toFixed(2)}%, ${elapsedSeconds.toFixed(1)}s`,
-    );
-    return result;
-  }
 
   // 先各加载一次页面确认两侧都带 __chartBench（忘记用 VITE_CHART_BENCH=1 构建时最常见），
   // 否则会在跑完一次三分钟的基准后才失败。
@@ -344,11 +346,35 @@ try {
     const order = warmup % 2 === 0 ? "AB" : "BA";
     console.log(`warmup ${warmup + 1}/${warmupRounds} (${order})`);
     if (order === "AB") {
-      await run("A baseline", baselinePort);
-      await run("B candidate", candidatePort);
+      await runBenchmark({
+        label: "A baseline",
+        port: baselinePort,
+        page,
+        environments,
+        cooldownSec,
+      });
+      await runBenchmark({
+        label: "B candidate",
+        port: candidatePort,
+        page,
+        environments,
+        cooldownSec,
+      });
     } else {
-      await run("B candidate", candidatePort);
-      await run("A baseline", baselinePort);
+      await runBenchmark({
+        label: "B candidate",
+        port: candidatePort,
+        page,
+        environments,
+        cooldownSec,
+      });
+      await runBenchmark({
+        label: "A baseline",
+        port: baselinePort,
+        page,
+        environments,
+        cooldownSec,
+      });
     }
   }
 
@@ -359,11 +385,35 @@ try {
     let baseline;
     let candidate;
     if (order === "AB") {
-      baseline = await run("A baseline", baselinePort);
-      candidate = await run("B candidate", candidatePort);
+      baseline = await runBenchmark({
+        label: "A baseline",
+        port: baselinePort,
+        page,
+        environments,
+        cooldownSec,
+      });
+      candidate = await runBenchmark({
+        label: "B candidate",
+        port: candidatePort,
+        page,
+        environments,
+        cooldownSec,
+      });
     } else {
-      candidate = await run("B candidate", candidatePort);
-      baseline = await run("A baseline", baselinePort);
+      candidate = await runBenchmark({
+        label: "B candidate",
+        port: candidatePort,
+        page,
+        environments,
+        cooldownSec,
+      });
+      baseline = await runBenchmark({
+        label: "A baseline",
+        port: baselinePort,
+        page,
+        environments,
+        cooldownSec,
+      });
     }
     assertComparable(baseline, candidate);
     const deltaPercent =
