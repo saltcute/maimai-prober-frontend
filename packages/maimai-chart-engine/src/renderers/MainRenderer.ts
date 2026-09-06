@@ -709,7 +709,12 @@ export class MainRenderer {
         isSimultaneous: this.getNoteMeta(noteMeta, slides[i]).simultaneousSlideCount >= 2,
       });
     }
-    this.slideRenderer.renderStableTracks(layerTracks, timing.currentBeat, timing.currentTimeMs);
+    this.slideRenderer.renderStableTracks(
+      layerTracks,
+      timing.currentBeat,
+      timing.currentTimeMs,
+      !this.isPlaying,
+    );
     this.profileMark("tracks");
 
     for (let i = slideHi - 1; i >= slideLo; i--) {
